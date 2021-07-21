@@ -8,6 +8,7 @@ import {
   arg,
   asNexusMethod,
   enumType,
+  list,
 } from 'nexus'
 import { DateTimeResolver } from 'graphql-scalars'
 import { Context } from './context'
@@ -23,126 +24,58 @@ const Query = objectType({
         return context.prisma.user.findMany()
       },
     })
-
-    t.nullable.field('postById', {
-      type: 'Post',
-      args: {
-        id: intArg(),
-      },
-      resolve: (_parent, args, context: Context) => {
-        return context.prisma.post.findUnique({
-          where: { id: args.id || undefined },
-        })
-      },
-    })
-
-    t.nonNull.list.nonNull.field('feed', {
-      type: 'Post',
-      args: {
-        searchString: stringArg(),
-        skip: intArg(),
-        take: intArg(),
-        orderBy: arg({
-          type: 'PostOrderByUpdatedAtInput',
-        }),
-      },
-      resolve: (_parent, args, context: Context) => {
-        const or = args.searchString
-          ? {
-            OR: [
-              { title: { contains: args.searchString } },
-              { content: { contains: args.searchString } },
-            ],
-          }
-          : {}
-
-        return context.prisma.post.findMany({
-          where: {
-            published: true,
-            ...or,
-          },
-          take: args.take || undefined,
-          skip: args.skip || undefined,
-          orderBy: args.orderBy || undefined,
-        })
-      },
-    })
-
-    t.list.field('draftsByUser', {
-      type: 'Post',
-      args: {
-        userUniqueInput: nonNull(
-          arg({
-            type: 'UserUniqueInput',
-          }),
-        ),
-      },
-      resolve: (_parent, args, context: Context) => {
-        return context.prisma.user
-          .findUnique({
-            where: {
-              id: args.userUniqueInput.id || undefined,
-              email: args.userUniqueInput.email || undefined,
-            },
-          })
-          .posts({
-            where: {
-              published: false,
-            },
-          })
-      },
-    })
   },
 })
 
 const Mutation = objectType({
   name: 'Mutation',
   definition(t) {
-    t.nonNull.field('signupUser', {
-      type: 'User',
-      args: {
-        data: nonNull(
-          arg({
-            type: 'UserCreateInput',
-          }),
-        ),
-      },
-      resolve: (_, args, context: Context) => {
-        const postData = args.data.posts?.map((post) => {
-          return { title: post.title, content: post.content || undefined }
-        })
-        return context.prisma.user.create({
-          data: {
-            name: args.data.name,
-            email: args.data.email,
-            posts: {
-              create: postData,
-            },
-          },
-        })
+    t.field('createInterviewer', {
+      type: Interviewer,
+      args: {},
+      resolve: async (_, args, context: Context) => {
+        try {
+          await context.prisma.availability.deleteMany({
+            where: { interviewerId: args.interviewerId },
+          })
+          const availabilities = await Promise.all(
+            args.availabilities.map(async (availability) =>
+              context.prisma.availability.create({
+                data: { interviewerId: args.interviewerId, ...availability },
+              }),
+            ),
+          )
+          return availabilities
+        } catch (e) {
+          throw new Error(`it did not work`)
+        }
       },
     })
 
-    t.field('createDraft', {
-      type: 'Post',
+    t.field('setAvailability', {
+      type: list(Availability),
       args: {
-        data: nonNull(
-          arg({
-            type: 'PostCreateInput',
-          }),
+        interviewerId: nonNull(intArg()),
+        availabilities: nonNull(
+          list(nonNull(arg({ type: AvailabilityInput }))),
         ),
-        authorEmail: nonNull(stringArg()),
       },
-      resolve: (_, args, context: Context) => {
-        return context.prisma.post.create({
-          data: {
-            title: args.data.title,
-            content: args.data.content,
-            author: {
-              connect: { email: args.authorEmail },
-            },
-          },
-        })
+      resolve: async (_, args, context: Context) => {
+        try {
+          await context.prisma.availability.deleteMany({
+            where: { interviewerId: args.interviewerId },
+          })
+          const availabilities = await Promise.all(
+            args.availabilities.map(async (availability) =>
+              context.prisma.availability.create({
+                data: { interviewerId: args.interviewerId, ...availability },
+              }),
+            ),
+          )
+          return availabilities
+        } catch (e) {
+          throw new Error(`it did not work`)
+        }
       },
     })
 
@@ -154,7 +87,7 @@ const Mutation = objectType({
       resolve: async (_, args, context: Context) => {
         try {
           const post = await context.prisma.post.findUnique({
-            where: { id: args.id || undefined },
+            where: { id: args.id },
             select: {
               published: true,
             },
@@ -199,6 +132,30 @@ const Mutation = objectType({
         })
       },
     })
+  },
+})
+
+const Interviewer = objectType({
+  name: 'Interviewer',
+  definition(t) {
+    t.nonNull.int('id')
+  },
+})
+
+const Availability = objectType({
+  name: 'Availability',
+  definition(t) {
+    t.nonNull.int('id')
+    t.nonNull.date('start')
+    t.nonNull.date('end')
+  },
+})
+
+const AvailabilityInput = inputObjectType({
+  name: 'AvailabilityInput',
+  definition(t) {
+    t.nonNull.date('start')
+    t.nonNull.date('end')
   },
 })
 
